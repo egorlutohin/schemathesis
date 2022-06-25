@@ -7,7 +7,7 @@ import time
 from contextlib import suppress
 from io import BytesIO
 from queue import Queue
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import attr
 import click
@@ -15,7 +15,7 @@ import click
 from ..cli.context import ExecutionContext
 from ..cli.handlers import EventHandler
 from ..runner.events import ExecutionEvent, Initialized, InternalError, Interrupted
-from . import ServiceClient, ci, events
+from . import ServiceClient, ci, events, usage
 from .constants import REPORT_FORMAT_VERSION, STOP_MARKER, WORKER_JOIN_TIMEOUT
 from .hosts import HostData
 from .metadata import Metadata
@@ -49,6 +49,7 @@ class ReportWriter:
         base_url: str,
         metadata: Metadata,
         ci_environment: Optional[ci.Environment],
+        usage_data: Optional[Dict[str, Any]],
     ) -> None:
         data = {
             # API identifier on the Schemathesis.io side (optional)
@@ -61,6 +62,8 @@ class ReportWriter:
             "environment": attr.asdict(metadata),
             # Environment variables specific for CI providers
             "ci": ci_environment.asdict() if ci_environment is not None else None,
+            # CLI usage statistic
+            "usage": usage_data,
             # Report format version
             "version": REPORT_FORMAT_VERSION,
         }
@@ -157,6 +160,7 @@ def write_remote(
                 base_url=base_url,
                 metadata=Metadata(),
                 ci_environment=ci.environment(),
+                usage_data=usage.collect(),
             )
             if consume_events(writer, in_queue) == ConsumeResult.INTERRUPT:
                 return
@@ -193,7 +197,12 @@ def write_file(file_handle: click.utils.LazyFile, location: str, base_url: str, 
     with file_handle.open() as fileobj, tarfile.open(mode="w:gz", fileobj=fileobj) as tar:
         writer = ReportWriter(tar)
         writer.add_metadata(
-            api_name=None, location=location, base_url=base_url, metadata=Metadata(), ci_environment=ci.environment()
+            api_name=None,
+            location=location,
+            base_url=base_url,
+            metadata=Metadata(),
+            ci_environment=ci.environment(),
+            usage_data=usage.collect(),
         )
         result = consume_events(writer, in_queue)
     if result == ConsumeResult.INTERRUPT:
